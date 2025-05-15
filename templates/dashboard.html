@@ -5,6 +5,7 @@
     <title>Equity Document Dashboard</title>
     <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet" />
     <style>
+        /* [Same CSS styles as you provided] */
         body {
             background: linear-gradient(135deg, #eef2f7 0%, #f9fbfd 100%);
             font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
@@ -104,7 +105,6 @@
             max-width: 1200px;
         }
 
-        /* Responsive tweaks */
         @media (max-width: 768px) {
             .filter-select {
                 margin-bottom: 1rem;
@@ -114,21 +114,21 @@
                 max-width: 100%;
             }
         }
+
         #loadingSpinner {
-            position: relative; /* Changed from absolute */
-            margin-top: 2rem;   /* Adds spacing below the table headers */
+            position: relative;
+            margin-top: 2rem;
             text-align: center;
             z-index: 10;
         }
 
         #loadingSpinner .spinner-border {
-            width: 4rem;       /* Bigger spinner */
+            width: 4rem;
             height: 4rem;
-            border-width: 0.5rem; /* Bolder stroke */
+            border-width: 0.5rem;
             font-weight: bold;
         }
 
-        /* Highlight missing documents */
         .missing {
             background-color: rgba(231, 76, 60, 0.1);
         }
@@ -138,54 +138,34 @@
     <div class="container py-5">
         <h2 class="mb-5 text-center fw-bold">📊 Equity Document Dashboard</h2>
 
-        <!-- Upload JSON Card -->
+        <!-- Category & Equity Filters -->
         <div class="card mb-5 p-4">
-            <h5 class="mb-4 fw-semibold text-primary">Upload JSON Metadata</h5>
-            <form action="{% url 'upload_json' %}" method="post" enctype="multipart/form-data" class="row g-3 align-items-center">
-                {% csrf_token %}
-                <div class="col-md-10">
-                    <input type="file" name="json_file" class="form-control filter-select" accept=".json" required />
+            <h5 class="mb-4 fw-semibold text-primary">Select Category & Equity</h5>
+            <form method="get" class="row g-3 align-items-center">
+                <div class="col-md-4">
+                    <select name="category" class="form-select filter-select" onchange="this.form.submit()">
+                        <option value="">Choose Category</option>
+                        {% for category in categories %}
+                            <option value="{{ category }}" {% if category == selected_category %}selected{% endif %}>
+                                {{ category }}
+                            </option>
+                        {% endfor %}
+                    </select>
                 </div>
-                <div class="col-md-2 d-grid">
-                    <button class="btn btn-primary" type="submit">Upload</button>
+                <div class="col-md-4">
+                    <select name="equity" class="form-select filter-select" onchange="this.form.submit()">
+                        <option value="">Choose Equity</option>
+                        {% for ticker in equities %}
+                            <option value="{{ ticker }}" {% if ticker == selected_equity %}selected{% endif %}>
+                                {{ ticker }}
+                            </option>
+                        {% endfor %}
+                    </select>
                 </div>
             </form>
         </div>
 
-        <!-- Filters -->
-        <div class="card mb-5 p-4">
-            <h5 class="mb-4 fw-semibold text-primary">Filters</h5>
-            <div class="row g-3 align-items-center">
-                <div class="col-md-3 d-flex align-items-center gap-2">
-                    <select id="tickerFilter" class="form-select filter-select" aria-label="Filter by ticker">
-                        <option value="">All Tickers</option>
-                        {% for ticker in tickers %}
-                            <option value="{{ ticker }}">{{ ticker }}</option>
-                        {% endfor %}
-                    </select>
-                    <button id="deleteTickerBtn" class="btn btn-danger btn-sm" disabled title="Delete all documents for selected ticker">
-                        Delete
-                    </button>
-                </div>
-                <div class="col-md-3">
-                    <select id="typeFilter" class="form-select filter-select" aria-label="Filter by content type">
-                        <option value="">All Content Types</option>
-                        {% for t in content_types %}
-                            <option value="{{ t }}">{{ t }}</option>
-                        {% endfor %}
-                    </select>
-                </div>
-                <div class="col-md-3">
-                    <select id="periodicityFilter" class="form-select filter-select" aria-label="Filter by periodicity">
-                        <option value="">All Periodicities</option>
-                        <option value="periodic">Periodic</option>
-                        <option value="non_periodic">Non Periodic</option>
-                    </select>
-                </div>
-            </div>
-        </div>
-
-        <!-- Table Card -->
+        <!-- Document Table -->
         <div class="card p-4">
             <h5 class="mb-4 fw-semibold text-primary">Document Summary</h5>
             <div class="table-responsive">
@@ -196,7 +176,7 @@
                     <div class="mt-2 fw-semibold text-primary">Loading...</div>
                 </div>
 
-                <table class="table table-hover align-middle" id="documentTable" role="grid" aria-describedby="Document Summary Table">
+                <table class="table table-hover align-middle" id="documentTable">
                     <thead class="table-light">
                         <tr>
                             <th scope="col">Ticker</th>
@@ -221,8 +201,8 @@
                             <td>{{ doc.content_name|default:"—" }}</td>
                             <td>{{ doc.file_type|default:"—" }}</td>
                             <td>{{ doc.content_type }}</td>
-                            <td>{{ doc.published_date|date:"Y-m-d" }}</td>
-                            <td>{{ doc.fiscal_date|date:"Y-m-d"|default:"—" }}</td>
+                            <td>{{ doc.published_date }}</td>
+                            <td>{{ doc.fiscal_date }}</td>
                             <td>{{ doc.fiscal_year }}</td>
                             <td>{{ doc.fiscal_quarter|default:"—" }}</td>
                             <td>{{ doc.periodicity|default:"—" }}</td>
@@ -243,109 +223,28 @@
                         </tr>
                         {% endfor %}
 
-                        <!-- Display missing documents -->
                         {% for tuple_key, missing_content in missing_docs.items %}
-    {% for content_type in missing_content %}
-    <tr class="missing">
-        <td>{{ tuple_key.0 }}</td> {# ticker #}
-        <td>US</td>
-        <td>—</td>
-        <td>pdf</td>
-        <td>{{ content_type }}</td>
-        <td>—</td>
-        <td>—</td>
-        <td>{{ tuple_key.1 }}</td> {# year #}
-        <td>{{ tuple_key.2 }}</td> {# quarter #}
-        <td>periodic</td>
-        <td><span class="badge bg-danger">Missing</span></td>
-        <td><span class="text-muted">N/A</span></td>
-    </tr>
-    {% endfor %}
-{% endfor %}
+                            {% for content_type in missing_content %}
+                                <tr class="missing">
+                                    <td>{{ tuple_key.0 }}</td>
+                                    <td>US</td>
+                                    <td>—</td>
+                                    <td>pdf</td>
+                                    <td>{{ content_type }}</td>
+                                    <td>—</td>
+                                    <td>—</td>
+                                    <td>{{ tuple_key.1 }}</td>
+                                    <td>{{ tuple_key.2 }}</td>
+                                    <td>periodic</td>
+                                    <td><span class="badge bg-danger">Missing</span></td>
+                                    <td><span class="text-muted">N/A</span></td>
+                                </tr>
+                            {% endfor %}
+                        {% endfor %}
                     </tbody>
                 </table>
             </div>
         </div>
     </div>
-
-    <!-- Filtering script -->
-    <script>
-        document.addEventListener("DOMContentLoaded", function () {
-            const tickerFilter = document.getElementById("tickerFilter");
-            const typeFilter = document.getElementById("typeFilter");
-            const periodicityFilter = document.getElementById("periodicityFilter");
-            const tableBody = document.querySelector("#documentTable tbody");
-            const loadingSpinner = document.getElementById("loadingSpinner");
-            const deleteTickerBtn = document.getElementById("deleteTickerBtn");
-
-            const originalRows = Array.from(tableBody.rows);
-
-            function applyFilters() {
-                loadingSpinner.style.display = "block";
-                tableBody.innerHTML = "";
-
-                setTimeout(() => {
-                    const ticker = tickerFilter.value.toLowerCase();
-                    const type = typeFilter.value.toLowerCase();
-                    const periodicity = periodicityFilter.value.toLowerCase();
-
-                    const filteredRows = originalRows.filter(row => {
-                        const cells = row.querySelectorAll("td");
-                        if (!cells || cells.length < 10) return false;
-
-                        const rowTicker = cells[0].textContent.trim().toLowerCase();
-                        const rowType = cells[4].textContent.trim().toLowerCase();
-                        const rowPeriodicity = cells[9].textContent.trim().toLowerCase();
-
-                        const tickerMatch = !ticker || rowTicker === ticker;
-                        const typeMatch = !type || rowType === type;
-                        const periodicityMatch = !periodicity || rowPeriodicity === periodicity;
-
-                        return tickerMatch && typeMatch && periodicityMatch;
-                    });
-
-                    if (filteredRows.length === 0) {
-                        const emptyRow = document.createElement("tr");
-                        emptyRow.innerHTML = `<td colspan="12" class="text-center text-muted">No documents match your filters.</td>`;
-                        tableBody.appendChild(emptyRow);
-                    } else {
-                        filteredRows.forEach(row => tableBody.appendChild(row));
-                    }
-
-                    loadingSpinner.style.display = "none";
-                }, 300); // simulate a loading delay
-            }
-
-            // Event listeners
-            tickerFilter.addEventListener("change", () => {
-                applyFilters();
-                deleteTickerBtn.disabled = !tickerFilter.value;
-            });
-
-            typeFilter.addEventListener("change", applyFilters);
-            periodicityFilter.addEventListener("change", applyFilters);
-
-            // Delete documents by ticker
-            deleteTickerBtn.addEventListener("click", () => {
-                const selectedTicker = tickerFilter.value;
-                if (selectedTicker && confirm(`Are you sure you want to delete all documents for ticker "${selectedTicker}"?`)) {
-                    fetch(`/delete_documents/${selectedTicker}/`, {
-                        method: "POST",
-                        headers: {
-                            "X-CSRFToken": document.querySelector('[name=csrfmiddlewaretoken]').value
-                        }
-                    })
-                    .then(response => {
-                        if (response.ok) {
-                            window.location.reload();
-                        } else {
-                            alert("Failed to delete documents.");
-                        }
-                    });
-                }
-            });
-        });
-    </script>
-
 </body>
 </html>

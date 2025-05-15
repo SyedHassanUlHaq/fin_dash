@@ -1,137 +1,80 @@
-from django.shortcuts import render, redirect
-from django.http import JsonResponse
-from django.views.decorators.csrf import csrf_exempt
-from django.views.decorators.http import require_POST
-from django.shortcuts import get_list_or_404
-from .models import Document
 import json
-from django.contrib import messages
+from django.shortcuts import render
+from dashboard.utils import get_available_categories, get_equity_tickers_by_category, load_json_data
 from datetime import datetime
 
-# Create your views here.
-
-from datetime import date
-from django.shortcuts import render
-from .models import Document
-
-from datetime import date
-from django.shortcuts import render
-from .models import Document
+# Required content per quarter/year
+REQUIRED_CONTENT = {
+    'Q1': ['quarterly_report', 'earnings_presentation', 'earnings_transcript', 'earnings_press_release'],
+    'Q2': ['quarterly_report', 'earnings_presentation', 'earnings_transcript', 'earnings_press_release'],
+    'Q3': ['quarterly_report', 'earnings_presentation', 'earnings_transcript', 'earnings_press_release'],
+    'Q4': ['annual_report', 'earnings_presentation', 'earnings_transcript', 'earnings_press_release'],
+}
 
 def dashboard_view(request):
-    # ✅ Include only documents published on or after 2006-01-01
-    cutoff_date = date(2006, 1, 1)
-    documents = Document.objects.filter(published_date__gte=cutoff_date).order_by('-published_date')
+    selected_category = request.GET.get('category')
+    selected_equity = request.GET.get('equity')
 
-    # Get distinct tickers and content types from the filtered documents
-    tickers = documents.values_list('equity_ticker', flat=True).distinct()
-    content_types = documents.values_list('content_type', flat=True).distinct()
+    categories = get_available_categories()
+    equities = get_equity_tickers_by_category(selected_category) if selected_category else []
 
-    # Required content per quarter/year
-    required_content = {
-        'Q1': ['quarterly_report', 'earnings_presentation', 'earnings_transcript', 'earnings_press_release'],
-        'Q2': ['quarterly_report', 'earnings_presentation', 'earnings_transcript', 'earnings_press_release'],
-        'Q3': ['quarterly_report', 'earnings_presentation', 'earnings_transcript', 'earnings_press_release'],
-        'Q4': ['annual_report', 'earnings_presentation', 'earnings_transcript', 'earnings_press_release'],
-    }
-
-    # Build a dictionary keyed by (ticker, fiscal_year, fiscal_quarter) with content types present
-    present_docs = {}
-    fiscal_years = set()
-    for doc in documents:
-        key = (doc.equity_ticker, doc.fiscal_year, doc.fiscal_quarter)
-        fiscal_years.add(doc.fiscal_year)
-        present_docs.setdefault(key, set()).add(doc.content_type)
-
-    # Build all possible expected keys
-    all_possible_keys = set()
-    for ticker in tickers:
-        for year in fiscal_years:
-            for quarter in ['Q1', 'Q2', 'Q3', 'Q4']:
-                all_possible_keys.add((ticker, year, quarter))
-
-    # Compute missing documents per (ticker, year, quarter)
+    documents = []
     missing_docs = {}
-    for key in all_possible_keys:
-        ticker, year, quarter = key
-        required = set(required_content.get(quarter, []))
-        present = present_docs.get(key, set())
-        missing = required - present
-        if missing:
-            missing_docs[key] = missing
+    current_year = datetime.now().year
 
-    context = {
+    if selected_category and selected_equity:
+        data = load_json_data(selected_category, selected_equity)
+        if data and isinstance(data, list):
+            filtered_data = [d for d in data if d.get('fiscal_year') is not None and d['fiscal_year'] >= 2006]
+            present_docs = {}
+            all_fiscal_years = set()
+
+            for doc in filtered_data:
+                fy = doc.get('fiscal_year')
+                fq = str(doc.get('fiscal_quarter'))
+                ct = doc.get('content_type')
+                if fy and fq and ct:
+                    key = (fy, fq)
+                    present_docs.setdefault(key, set()).add(ct)
+                    all_fiscal_years.add(fy)
+
+            # Ensure complete missing doc detection
+            synthetic_missing_docs = []
+            if all_fiscal_years:
+                min_year = min(all_fiscal_years)
+                for year in range(min_year, current_year + 1):
+                    for quarter in ['1', '2', '3', '4']:
+                        required_types = set(REQUIRED_CONTENT.get(f"Q{quarter}", []))
+                        present_types = present_docs.get((year, quarter), set())
+                        missing_types = required_types - present_types
+                        if missing_types:
+                            for missing_type in missing_types:
+                                missing_docs.setdefault((year, quarter), set()).add(missing_type)
+                                synthetic_missing_docs.append({
+                                    "equity_ticker": selected_equity,
+                                    "geography": None,
+                                    "content_name": None,
+                                    "file_type": None,
+                                    "content_type": missing_type,
+                                    "published_date": None,
+                                    "fiscal_date": None,
+                                    "fiscal_year": year,
+                                    "fiscal_quarter": quarter,
+                                    "periodicity": "quarterly" if quarter in ['1', '2', '3'] else "annual",
+                                    "is_missing": True,
+                                    "link": None,
+                                })
+
+            # 🔧 Append actual + synthetic
+            documents = filtered_data + synthetic_missing_docs
+        else:
+            documents = [{"error": "Error: JSON data is missing or not a list"}]
+
+    return render(request, 'dashboard.html', {
+        'categories': categories,
+        'selected_category': selected_category,
+        'equities': equities,
+        'selected_equity': selected_equity,
         'documents': documents,
-        'tickers': tickers,
-        'content_types': content_types,
         'missing_docs': missing_docs,
-    }
-    return render(request, 'dashboard.html', context)
-
-
-
-@require_POST
-def upload_json(request):
-    if request.method == 'POST' and request.FILES.get('json_file'):
-        json_file = request.FILES['json_file']
-        try:
-            data = json.load(json_file)
-            for item in data:
-                pub_date = datetime.strptime(item['published_date'], '%Y-%m-%d').date()
-                fiscal_date = None
-                if item.get('fiscal_date'):
-                    fiscal_date = datetime.strptime(item['fiscal_date'], '%Y-%m-%d').date()
-
-                # Determine uniqueness conditionally
-                if item.get('periodicity') == 'periodic':
-                    lookup = {
-                        'equity_ticker': item['equity_ticker'],
-                        'content_type': item['content_type'],
-                        'content_name': item.get('content_name'),
-                        'fiscal_year': item['fiscal_year'],
-                        'fiscal_quarter': item.get('fiscal_quarter'),
-                    }
-                else:  # non-periodic
-                    # Use content_name and published_date to uniquely identify
-                    lookup = {
-                        'equity_ticker': item['equity_ticker'],
-                        'content_type': item['content_type'],
-                        'content_name': item.get('content_name'),
-                        'published_date': pub_date,
-                    }
-
-                Document.objects.update_or_create(
-                    **lookup,
-                    defaults={
-                        'published_date': pub_date,
-                        'geography': item.get('geography'),
-                        'file_type': item.get('file_type'),
-                        'fiscal_date': fiscal_date,
-                        'fiscal_year': item.get('fiscal_year'),  # can be None
-                        'fiscal_quarter': item.get('fiscal_quarter'),
-                        'periodicity': item.get('periodicity'),
-                        'is_missing': item.get('is_missing', False),
-                        'r2_url': item.get('r2_url')
-                    }
-                )
-                print(f"Processed item: {item['equity_ticker']} - {item['content_type']} ({item['fiscal_year']})")
-            messages.success(request, "JSON uploaded and data saved successfully.")
-        except Exception as e:
-            print(f"Error processing JSON file: {e}")
-            messages.error(request, f"Error processing JSON file: {e}")
-        print("Redirecting to dashboard after upload...")
-        return redirect('dashboard')
-    print("No file uploaded or invalid request method.")
-    return redirect('dashboard')
-
-@csrf_exempt
-def delete_equity_documents(request, ticker):
-    if request.method == "POST":
-        try:
-            # Delete all documents related to the ticker
-            deleted_count, _ = Document.objects.filter(equity_ticker=ticker).delete()
-            return JsonResponse({"status": "success", "deleted_count": deleted_count})
-        except Exception as e:
-            return JsonResponse({"status": "error", "message": str(e)}, status=500)
-    else:
-        return JsonResponse({"status": "error", "message": "Invalid method"}, status=405)
+    })
