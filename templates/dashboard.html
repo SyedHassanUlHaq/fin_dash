@@ -115,6 +115,20 @@
                 max-width: 100%;
             }
         }
+        #loadingSpinner {
+            position: relative; /* Changed from absolute */
+            margin-top: 2rem;   /* Adds spacing below the table headers */
+            text-align: center;
+            z-index: 10;
+        }
+        
+        #loadingSpinner .spinner-border {
+            width: 4rem;       /* Bigger spinner */
+            height: 4rem;
+            border-width: 0.5rem; /* Bolder stroke */
+            font-weight: bold;
+        }
+        
     </style>
 </head>
 <body>
@@ -138,14 +152,17 @@
         <!-- Filters -->
         <div class="card mb-5 p-4">
             <h5 class="mb-4 fw-semibold text-primary">Filters</h5>
-            <div class="row g-3">
-                <div class="col-md-3">
+            <div class="row g-3 align-items-center">
+                <div class="col-md-3 d-flex align-items-center gap-2">
                     <select id="tickerFilter" class="form-select filter-select" aria-label="Filter by ticker">
                         <option value="">All Tickers</option>
                         {% for ticker in tickers %}
                             <option value="{{ ticker }}">{{ ticker }}</option>
                         {% endfor %}
                     </select>
+                    <button id="deleteTickerBtn" class="btn btn-danger btn-sm" disabled title="Delete all documents for selected ticker">
+                        Delete
+                    </button>
                 </div>
                 <div class="col-md-3">
                     <select id="typeFilter" class="form-select filter-select" aria-label="Filter by content type">
@@ -159,7 +176,7 @@
                     <select id="periodicityFilter" class="form-select filter-select" aria-label="Filter by periodicity">
                         <option value="">All Periodicities</option>
                         <option value="periodic">Periodic</option>
-                        <option value="non-periodic">Non-Periodic</option>
+                        <option value="non_periodic">Non Periodic</option>
                     </select>
                 </div>
             </div>
@@ -169,14 +186,26 @@
         <div class="card p-4">
             <h5 class="mb-4 fw-semibold text-primary">Document Summary</h5>
             <div class="table-responsive">
+                <div id="loadingSpinner" style="display: none;">
+                    <div class="spinner-border text-primary" role="status">
+                        <span class="visually-hidden">Loading...</span>
+                    </div>
+                    <div class="mt-2 fw-semibold text-primary">Loading...</div>
+                </div>
+                
                 <table class="table table-hover align-middle" id="documentTable" role="grid" aria-describedby="Document Summary Table">
                     <thead class="table-light">
                         <tr>
                             <th scope="col">Ticker</th>
+                            <th scope="col">Geography</th>
+                            <th scope="col">Content Name</th>
+                            <th scope="col">File Type</th>
                             <th scope="col">Type</th>
+                            <th scope="col">Published Date</th>
+                            <th scope="col">Fiscal Date</th>
                             <th scope="col">Year</th>
                             <th scope="col">Quarter</th>
-                            <th scope="col">Published Date</th>
+                            <th scope="col">Periodicity</th>
                             <th scope="col">Status</th>
                             <th scope="col">Link</th>
                         </tr>
@@ -185,10 +214,15 @@
                         {% for doc in documents %}
                         <tr>
                             <td>{{ doc.equity_ticker }}</td>
+                            <td>{{ doc.geography|default:"—" }}</td>
+                            <td>{{ doc.content_name|default:"—" }}</td>
+                            <td>{{ doc.file_type|default:"—" }}</td>
                             <td>{{ doc.content_type }}</td>
+                            <td>{{ doc.published_date|date:"Y-m-d" }}</td>
+                            <td>{{ doc.fiscal_date|date:"Y-m-d"|default:"—" }}</td>
                             <td>{{ doc.fiscal_year }}</td>
                             <td>{{ doc.fiscal_quarter|default:"—" }}</td>
-                            <td>{{ doc.published_date|date:"Y-m-d" }}</td>
+                            <td>{{ doc.periodicity|default:"—" }}</td>
                             <td>
                                 {% if doc.is_missing %}
                                     <span class="badge bg-danger">Missing</span>
@@ -206,7 +240,7 @@
                         </tr>
                         {% empty %}
                         <tr>
-                            <td colspan="7" class="text-center text-muted">No documents available.</td>
+                            <td colspan="12" class="text-center text-muted">No documents available.</td>
                         </tr>
                         {% endfor %}
                     </tbody>
@@ -217,34 +251,122 @@
 
     <!-- Filtering script -->
     <script>
-        const filters = {
-            ticker: document.getElementById('tickerFilter'),
-            type: document.getElementById('typeFilter'),
-            periodicity: document.getElementById('periodicityFilter'),
-            tableBody: document.getElementById('documentTable').querySelector('tbody')
-        };
-
-        function applyFilters() {
-            const rows = filters.tableBody.querySelectorAll('tr');
-            const ticker = filters.ticker.value.toLowerCase();
-            const type = filters.type.value.toLowerCase();
-            const periodicity = filters.periodicity.value.toLowerCase();
-
-            rows.forEach(row => {
-                const cells = row.querySelectorAll('td');
-                if(cells.length === 0) return; // Skip empty rows message
-
-                const tickerMatch = !ticker || cells[0].textContent.toLowerCase().includes(ticker);
-                const typeMatch = !type || cells[1].textContent.toLowerCase().includes(type);
-                const periodicMatch = !periodicity || (periodicity === "periodic") === !cells[5].textContent.toLowerCase().includes("missing");
-
-                row.style.display = (tickerMatch && typeMatch && periodicMatch) ? '' : 'none';
+        document.addEventListener("DOMContentLoaded", function () {
+            const tickerFilter = document.getElementById("tickerFilter");
+            const typeFilter = document.getElementById("typeFilter");
+            const periodicityFilter = document.getElementById("periodicityFilter");
+            const tableBody = document.querySelector("#documentTable tbody");
+            const loadingSpinner = document.getElementById("loadingSpinner");
+            const deleteTickerBtn = document.getElementById("deleteTickerBtn");
+        
+            // Store original rows so we can re-render from them
+            const originalRows = Array.from(tableBody.rows);
+        
+            function applyFilters() {
+                // Show spinner and clear table
+                loadingSpinner.style.display = "block";
+                tableBody.innerHTML = ""; // Temporarily clear the table
+        
+                setTimeout(() => {
+                    const ticker = tickerFilter.value;
+                    const type = typeFilter.value;
+                    const periodicity = periodicityFilter.value;
+        
+                    // Filter the original rows
+                    let filteredRows = originalRows.filter(row => {
+                        const cells = row.querySelectorAll("td");
+                        if (cells.length === 0) return false; // skip empty message row
+        
+                        const rowTicker = cells[0].innerText.trim();
+                        const rowType = cells[4].innerText.trim();
+                        const rowPeriodicity = cells[9].innerText.trim().toLowerCase();
+        
+                        const show =
+                            (!ticker || rowTicker === ticker) &&
+                            (!type || rowType === type) &&
+                            (!periodicity ||
+                                (periodicity === "periodic" && rowPeriodicity !== "non_periodic") ||
+                                (periodicity === "non_periodic" && rowPeriodicity === "non_periodic"));
+        
+                        return show;
+                    });
+        
+                    // Sort filtered rows by Published Date (6th column, index 5) descending
+                    filteredRows.sort((a, b) => {
+                        const dateA = new Date(a.cells[5].innerText.trim());
+                        const dateB = new Date(b.cells[5].innerText.trim());
+                        return dateB - dateA; // descending order
+                    });
+        
+                    // Re-render filtered rows
+                    if (filteredRows.length > 0) {
+                        filteredRows.forEach(row => tableBody.appendChild(row));
+                    } else {
+                        const noDataRow = document.createElement("tr");
+                        noDataRow.innerHTML = `<td colspan="12" class="text-center text-muted">No documents available.</td>`;
+                        tableBody.appendChild(noDataRow);
+                    }
+        
+                    loadingSpinner.style.display = "none"; // Hide spinner
+                }, 300); // Simulated delay
+            }
+        
+            // Enable or disable delete button based on ticker selection
+            function toggleDeleteBtn() {
+                deleteTickerBtn.disabled = !tickerFilter.value;
+            }
+        
+            // Handle delete all documents for selected ticker
+            deleteTickerBtn.addEventListener("click", () => {
+                const ticker = tickerFilter.value;
+                if (!ticker) return;
+        
+                if (confirm(`Are you sure you want to DELETE ALL documents for equity "${ticker}"? This action cannot be undone.`)) {
+                    deleteTickerBtn.disabled = true;
+                    deleteTickerBtn.innerText = "Deleting...";
+        
+                    fetch(`/delete_equity/${encodeURIComponent(ticker)}/`, {
+                        method: "POST",
+                        headers: {
+                            "X-CSRFToken": "{{ csrf_token }}",
+                            "Content-Type": "application/json",
+                        },
+                        body: JSON.stringify({ ticker: ticker }),
+                    })
+                    .then(response => {
+                        if (response.ok) {
+                            alert(`All documents for ${ticker} have been deleted.`);
+                            location.reload(); // Reload to reflect changes
+                        } else {
+                            alert("Failed to delete documents. Please try again.");
+                            deleteTickerBtn.disabled = false;
+                            deleteTickerBtn.innerText = "Delete";
+                        }
+                    })
+                    .catch(err => {
+                        alert("Error occurred: " + err.message);
+                        deleteTickerBtn.disabled = false;
+                        deleteTickerBtn.innerText = "Delete";
+                    });
+                }
             });
-        }
-
-        filters.ticker.addEventListener('change', applyFilters);
-        filters.type.addEventListener('change', applyFilters);
-        filters.periodicity.addEventListener('change', applyFilters);
-    </script>
+        
+            [tickerFilter, typeFilter, periodicityFilter].forEach(filter => {
+                filter.addEventListener("change", applyFilters);
+            });
+        
+            tickerFilter.addEventListener("change", () => {
+                applyFilters();
+                toggleDeleteBtn();
+            });
+        
+            // Initial state for delete button
+            toggleDeleteBtn();
+        
+            // Apply filters on initial load (to sort rows initially)
+            applyFilters();
+        });
+        </script>
+        
 </body>
 </html>
