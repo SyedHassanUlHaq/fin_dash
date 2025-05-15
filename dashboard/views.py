@@ -10,10 +10,22 @@ from datetime import datetime
 
 # Create your views here.
 
+from datetime import date
+from django.shortcuts import render
+from .models import Document
+
+from datetime import date
+from django.shortcuts import render
+from .models import Document
+
 def dashboard_view(request):
-    documents = Document.objects.all().order_by('-published_date')
-    tickers = Document.objects.values_list('equity_ticker', flat=True).distinct()
-    content_types = Document.objects.values_list('content_type', flat=True).distinct()
+    # ✅ Include only documents published on or after 2006-01-01
+    cutoff_date = date(2006, 1, 1)
+    documents = Document.objects.filter(published_date__gte=cutoff_date).order_by('-published_date')
+
+    # Get distinct tickers and content types from the filtered documents
+    tickers = documents.values_list('equity_ticker', flat=True).distinct()
+    content_types = documents.values_list('content_type', flat=True).distinct()
 
     # Required content per quarter/year
     required_content = {
@@ -31,19 +43,19 @@ def dashboard_view(request):
         fiscal_years.add(doc.fiscal_year)
         present_docs.setdefault(key, set()).add(doc.content_type)
 
-    # Now build the full set of expected keys to detect **fully missing** quarters
+    # Build all possible expected keys
     all_possible_keys = set()
     for ticker in tickers:
         for year in fiscal_years:
             for quarter in ['Q1', 'Q2', 'Q3', 'Q4']:
                 all_possible_keys.add((ticker, year, quarter))
 
-    # Compute missing data per (ticker, year, quarter)
+    # Compute missing documents per (ticker, year, quarter)
     missing_docs = {}
     for key in all_possible_keys:
         ticker, year, quarter = key
         required = set(required_content.get(quarter, []))
-        present = present_docs.get(key, set())  # may be empty set if no documents
+        present = present_docs.get(key, set())
         missing = required - present
         if missing:
             missing_docs[key] = missing
@@ -52,9 +64,11 @@ def dashboard_view(request):
         'documents': documents,
         'tickers': tickers,
         'content_types': content_types,
-        'missing_docs': missing_docs,  # pass to template
+        'missing_docs': missing_docs,
     }
     return render(request, 'dashboard.html', context)
+
+
 
 @require_POST
 def upload_json(request):

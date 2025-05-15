@@ -248,15 +248,15 @@
     {% for content_type in missing_content %}
     <tr class="missing">
         <td>{{ tuple_key.0 }}</td> {# ticker #}
+        <td>US</td>
         <td>—</td>
-        <td>—</td>
-        <td>—</td>
+        <td>pdf</td>
         <td>{{ content_type }}</td>
         <td>—</td>
         <td>—</td>
         <td>{{ tuple_key.1 }}</td> {# year #}
         <td>{{ tuple_key.2 }}</td> {# quarter #}
-        <td>—</td>
+        <td>periodic</td>
         <td><span class="badge bg-danger">Missing</span></td>
         <td><span class="text-muted">N/A</span></td>
     </tr>
