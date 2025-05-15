@@ -1,4 +1,3 @@
-<!-- templates/dashboard.html -->
 <!DOCTYPE html>
 <html lang="en">
 <head>
@@ -83,7 +82,7 @@
             transition: background-color 0.3s ease, box-shadow 0.3s ease;
         }
 
-        .btn-primary:hover, 
+        .btn-primary:hover,
         .btn-primary:focus {
             background-color: #357ABD;
             box-shadow: 0 6px 20px rgba(53, 122, 189, 0.5);
@@ -121,14 +120,18 @@
             text-align: center;
             z-index: 10;
         }
-        
+
         #loadingSpinner .spinner-border {
             width: 4rem;       /* Bigger spinner */
             height: 4rem;
             border-width: 0.5rem; /* Bolder stroke */
             font-weight: bold;
         }
-        
+
+        /* Highlight missing documents */
+        .missing {
+            background-color: rgba(231, 76, 60, 0.1);
+        }
     </style>
 </head>
 <body>
@@ -192,7 +195,7 @@
                     </div>
                     <div class="mt-2 fw-semibold text-primary">Loading...</div>
                 </div>
-                
+
                 <table class="table table-hover align-middle" id="documentTable" role="grid" aria-describedby="Document Summary Table">
                     <thead class="table-light">
                         <tr>
@@ -212,7 +215,7 @@
                     </thead>
                     <tbody>
                         {% for doc in documents %}
-                        <tr>
+                        <tr class="{% if doc.is_missing %}missing{% endif %}">
                             <td>{{ doc.equity_ticker }}</td>
                             <td>{{ doc.geography|default:"—" }}</td>
                             <td>{{ doc.content_name|default:"—" }}</td>
@@ -238,11 +241,27 @@
                                 {% endif %}
                             </td>
                         </tr>
-                        {% empty %}
-                        <tr>
-                            <td colspan="12" class="text-center text-muted">No documents available.</td>
-                        </tr>
                         {% endfor %}
+
+                        <!-- Display missing documents -->
+                        {% for tuple_key, missing_content in missing_docs.items %}
+    {% for content_type in missing_content %}
+    <tr class="missing">
+        <td>{{ tuple_key.0 }}</td> {# ticker #}
+        <td>—</td>
+        <td>—</td>
+        <td>—</td>
+        <td>{{ content_type }}</td>
+        <td>—</td>
+        <td>—</td>
+        <td>{{ tuple_key.1 }}</td> {# year #}
+        <td>{{ tuple_key.2 }}</td> {# quarter #}
+        <td>—</td>
+        <td><span class="badge bg-danger">Missing</span></td>
+        <td><span class="text-muted">N/A</span></td>
+    </tr>
+    {% endfor %}
+{% endfor %}
                     </tbody>
                 </table>
             </div>
@@ -258,115 +277,75 @@
             const tableBody = document.querySelector("#documentTable tbody");
             const loadingSpinner = document.getElementById("loadingSpinner");
             const deleteTickerBtn = document.getElementById("deleteTickerBtn");
-        
-            // Store original rows so we can re-render from them
+
             const originalRows = Array.from(tableBody.rows);
-        
+
             function applyFilters() {
-                // Show spinner and clear table
                 loadingSpinner.style.display = "block";
-                tableBody.innerHTML = ""; // Temporarily clear the table
-        
+                tableBody.innerHTML = "";
+
                 setTimeout(() => {
-                    const ticker = tickerFilter.value;
-                    const type = typeFilter.value;
-                    const periodicity = periodicityFilter.value;
-        
-                    // Filter the original rows
-                    let filteredRows = originalRows.filter(row => {
+                    const ticker = tickerFilter.value.toLowerCase();
+                    const type = typeFilter.value.toLowerCase();
+                    const periodicity = periodicityFilter.value.toLowerCase();
+
+                    const filteredRows = originalRows.filter(row => {
                         const cells = row.querySelectorAll("td");
-                        if (cells.length === 0) return false; // skip empty message row
-        
-                        const rowTicker = cells[0].innerText.trim();
-                        const rowType = cells[4].innerText.trim();
-                        const rowPeriodicity = cells[9].innerText.trim().toLowerCase();
-        
-                        const show =
-                            (!ticker || rowTicker === ticker) &&
-                            (!type || rowType === type) &&
-                            (!periodicity ||
-                                (periodicity === "periodic" && rowPeriodicity !== "non_periodic") ||
-                                (periodicity === "non_periodic" && rowPeriodicity === "non_periodic"));
-        
-                        return show;
+                        if (!cells || cells.length < 10) return false;
+
+                        const rowTicker = cells[0].textContent.trim().toLowerCase();
+                        const rowType = cells[4].textContent.trim().toLowerCase();
+                        const rowPeriodicity = cells[9].textContent.trim().toLowerCase();
+
+                        const tickerMatch = !ticker || rowTicker === ticker;
+                        const typeMatch = !type || rowType === type;
+                        const periodicityMatch = !periodicity || rowPeriodicity === periodicity;
+
+                        return tickerMatch && typeMatch && periodicityMatch;
                     });
-        
-                    // Sort filtered rows by Published Date (6th column, index 5) descending
-                    filteredRows.sort((a, b) => {
-                        const dateA = new Date(a.cells[5].innerText.trim());
-                        const dateB = new Date(b.cells[5].innerText.trim());
-                        return dateB - dateA; // descending order
-                    });
-        
-                    // Re-render filtered rows
-                    if (filteredRows.length > 0) {
-                        filteredRows.forEach(row => tableBody.appendChild(row));
+
+                    if (filteredRows.length === 0) {
+                        const emptyRow = document.createElement("tr");
+                        emptyRow.innerHTML = `<td colspan="12" class="text-center text-muted">No documents match your filters.</td>`;
+                        tableBody.appendChild(emptyRow);
                     } else {
-                        const noDataRow = document.createElement("tr");
-                        noDataRow.innerHTML = `<td colspan="12" class="text-center text-muted">No documents available.</td>`;
-                        tableBody.appendChild(noDataRow);
+                        filteredRows.forEach(row => tableBody.appendChild(row));
                     }
-        
-                    loadingSpinner.style.display = "none"; // Hide spinner
-                }, 300); // Simulated delay
+
+                    loadingSpinner.style.display = "none";
+                }, 300); // simulate a loading delay
             }
-        
-            // Enable or disable delete button based on ticker selection
-            function toggleDeleteBtn() {
+
+            // Event listeners
+            tickerFilter.addEventListener("change", () => {
+                applyFilters();
                 deleteTickerBtn.disabled = !tickerFilter.value;
-            }
-        
-            // Handle delete all documents for selected ticker
+            });
+
+            typeFilter.addEventListener("change", applyFilters);
+            periodicityFilter.addEventListener("change", applyFilters);
+
+            // Delete documents by ticker
             deleteTickerBtn.addEventListener("click", () => {
-                const ticker = tickerFilter.value;
-                if (!ticker) return;
-        
-                if (confirm(`Are you sure you want to DELETE ALL documents for equity "${ticker}"? This action cannot be undone.`)) {
-                    deleteTickerBtn.disabled = true;
-                    deleteTickerBtn.innerText = "Deleting...";
-        
-                    fetch(`/delete_equity/${encodeURIComponent(ticker)}/`, {
+                const selectedTicker = tickerFilter.value;
+                if (selectedTicker && confirm(`Are you sure you want to delete all documents for ticker "${selectedTicker}"?`)) {
+                    fetch(`/delete_documents/${selectedTicker}/`, {
                         method: "POST",
                         headers: {
-                            "X-CSRFToken": "{{ csrf_token }}",
-                            "Content-Type": "application/json",
-                        },
-                        body: JSON.stringify({ ticker: ticker }),
+                            "X-CSRFToken": document.querySelector('[name=csrfmiddlewaretoken]').value
+                        }
                     })
                     .then(response => {
                         if (response.ok) {
-                            alert(`All documents for ${ticker} have been deleted.`);
-                            location.reload(); // Reload to reflect changes
+                            window.location.reload();
                         } else {
-                            alert("Failed to delete documents. Please try again.");
-                            deleteTickerBtn.disabled = false;
-                            deleteTickerBtn.innerText = "Delete";
+                            alert("Failed to delete documents.");
                         }
-                    })
-                    .catch(err => {
-                        alert("Error occurred: " + err.message);
-                        deleteTickerBtn.disabled = false;
-                        deleteTickerBtn.innerText = "Delete";
                     });
                 }
             });
-        
-            [tickerFilter, typeFilter, periodicityFilter].forEach(filter => {
-                filter.addEventListener("change", applyFilters);
-            });
-        
-            tickerFilter.addEventListener("change", () => {
-                applyFilters();
-                toggleDeleteBtn();
-            });
-        
-            // Initial state for delete button
-            toggleDeleteBtn();
-        
-            // Apply filters on initial load (to sort rows initially)
-            applyFilters();
         });
-        </script>
-        
+    </script>
+
 </body>
 </html>
